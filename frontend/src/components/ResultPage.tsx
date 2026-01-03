@@ -575,7 +575,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
                     <button
                       onClick={fetchRecentPredictions}
                       className="px-6 py-3 rounded-lg border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-all duration-300 flex items-center gap-2 mx-auto font-medium"
-                    >
+                    > Click Me
                       <RefreshCw className="w-5 h-5" />
                       Refresh History
                     </button>
