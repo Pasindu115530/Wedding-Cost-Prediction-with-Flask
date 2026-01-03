@@ -16,7 +16,11 @@ import {
   Info,
   ArrowRight,
   CheckCircle2,
-  TrendingDown
+  TrendingDown,
+  Database,
+  Clock,
+  Users,
+  Calendar
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 
@@ -24,6 +28,7 @@ interface ResultPageProps {
   cost: number;
   onReset: () => void;
   onModify: () => void;
+  predictionId?: string; // Add prediction ID from the response
 }
 
 interface CostBreakdown {
@@ -34,9 +39,34 @@ interface CostBreakdown {
   color: string;
 }
 
-export function ResultPage({ cost, onReset, onModify }: ResultPageProps) {
+interface PredictionHistory {
+  _id: string;
+  estimated_cost: number;
+  user_budget: number;
+  guest_count: number;
+  venue_type: string;
+  wedding_season: string;
+  timestamp: string;
+  is_within_budget: boolean;
+}
+
+interface PredictionStats {
+  total_predictions: number;
+  statistics: {
+    avg_estimated_cost: number;
+    avg_guest_count: number;
+    avg_budget: number;
+  };
+  popular_venues: Array<{ _id: string; count: number }>;
+}
+
+export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPageProps) {
   const [displayCost, setDisplayCost] = useState(0);
   const [showChartType, setShowChartType] = useState<'pie' | 'bar'>('pie');
+  const [recentPredictions, setRecentPredictions] = useState<PredictionHistory[]>([]);
+  const [stats, setStats] = useState<PredictionStats | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   // Animated count-up effect
   useEffect(() => {
@@ -123,6 +153,29 @@ export function ResultPage({ cost, onReset, onModify }: ResultPageProps) {
   const highestCategory = costBreakdown.reduce((prev, current) => 
     prev.percentage > current.percentage ? prev : current
   );
+
+  // Fetch recent predictions from database
+  useEffect(() => {
+    fetchRecentPredictions();
+  }, [predictionId]);
+
+  const fetchRecentPredictions = async () => {
+    try {
+      setLoading(true);
+      // Change limit to 1 to get only the most recent record
+      const response = await fetch('http://localhost:5000/predictions/recent?limit=1');
+      const data = await response.json();
+      
+      if (data.status === 'Success' && data.predictions.length > 0) {
+        // Store only the first (latest) record
+        setRecentPredictions([data.predictions[0]]); 
+      }
+    } catch (error) {
+      console.error('Error fetching latest record:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <motion.div
@@ -213,6 +266,64 @@ export function ResultPage({ cost, onReset, onModify }: ResultPageProps) {
           </div>
         </motion.div>
 
+        {/* Database Statistics Card */}
+        {stats && (
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.3 }}
+            className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 border-2 border-blue-200 shadow-xl"
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 shadow-lg">
+                <Database className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-2xl">Wedding Prediction Statistics</h3>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <StatsCard
+                icon={Calendar}
+                label="Total Predictions"
+                value={stats.total_predictions.toString()}
+                color="from-blue-500 to-indigo-500"
+              />
+              <StatsCard
+                icon={Users}
+                label="Avg Guest Count"
+                value={Math.round(stats.statistics.avg_guest_count || 0).toString()}
+                color="from-purple-500 to-pink-500"
+              />
+              <StatsCard
+                icon={TrendingUp}
+                label="Avg Budget"
+                value={`LKR ${((stats.statistics.avg_estimated_cost || 0) / 1000).toFixed(0)}K`}
+                color="from-rose-500 to-orange-500"
+              />
+            </div>
+
+            {/* Popular Venues */}
+            {stats.popular_venues && stats.popular_venues.length > 0 && (
+              <div className="mt-6 p-4 bg-white/70 rounded-xl">
+                <h4 className="text-lg mb-3 flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-blue-600" />
+                  Most Popular Venue Types
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {stats.popular_venues.slice(0, 5).map((venue, index) => (
+                    <span
+                      key={venue._id}
+                      className="px-4 py-2 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-full text-sm border border-blue-300"
+                    >
+                      {venue._id}: <strong>{venue.count}</strong>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
         {/* Cost Distribution Section */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -272,6 +383,65 @@ export function ResultPage({ cost, onReset, onModify }: ResultPageProps) {
               <CategoryCard key={item.category} item={item} delay={index * 0.1} />
             ))}
           </div>
+        </motion.div>
+
+        {/* Recent Predictions History */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.7 }}
+          className="bg-white rounded-2xl p-8 shadow-xl border border-gray-100"
+        >
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 shadow-lg">
+                <Clock className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-2xl">Recent Predictions</h3>
+            </div>
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all duration-300 shadow-md"
+            >
+              {showHistory ? 'Hide' : 'Show'} History
+            </button>
+          </div>
+
+          {showHistory && (
+            <div className="space-y-4">
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-emerald-500 border-t-transparent mx-auto"></div>
+                  <p className="mt-4 text-gray-600">Loading predictions...</p>
+                </div>
+              ) : recentPredictions.length > 0 ? (
+                <>
+                  {recentPredictions.map((prediction, index) => (
+                    <PredictionCard
+                      key={prediction._id}
+                      prediction={prediction}
+                      delay={index * 0.1}
+                      isCurrentPrediction={prediction._id === predictionId}
+                    />
+                  ))}
+                  <div className="mt-6 text-center">
+                    <button
+                      onClick={fetchRecentPredictions}
+                      className="px-6 py-3 rounded-lg border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-all duration-300 flex items-center gap-2 mx-auto"
+                    >
+                      <RefreshCw className="w-5 h-5" />
+                      Refresh History
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8">
+                  <Database className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-600">No predictions found in database</p>
+                </div>
+              )}
+            </div>
+          )}
         </motion.div>
 
         {/* AI Insights */}
@@ -557,6 +727,126 @@ function CategoryCard({ item, delay }: { item: CostBreakdown; delay: number }) {
               {item.percentage}%
             </span>
           </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// Stats Card Component
+function StatsCard({ icon: Icon, label, value, color }: { 
+  icon: React.ElementType; 
+  label: string; 
+  value: string; 
+  color: string;
+}) {
+  return (
+    <motion.div
+      whileHover={{ scale: 1.05, y: -5 }}
+      className="bg-white rounded-xl p-6 shadow-lg border border-gray-100"
+    >
+      <div className={`inline-flex p-3 rounded-lg bg-gradient-to-r ${color} mb-3`}>
+        <Icon className="w-6 h-6 text-white" />
+      </div>
+      <div className="text-sm text-gray-600 mb-1">{label}</div>
+      <div className="text-2xl text-gray-900">{value}</div>
+    </motion.div>
+  );
+}
+
+// Prediction Card Component
+function PredictionCard({ 
+  prediction, 
+  delay, 
+  isCurrentPrediction 
+}: { 
+  prediction: PredictionHistory; 
+  delay: number;
+  isCurrentPrediction: boolean;
+}) {
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay, duration: 0.5 }}
+      className={`relative p-6 rounded-xl border-2 transition-all duration-300 ${
+        isCurrentPrediction
+          ? 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-300 shadow-lg'
+          : 'bg-gray-50 border-gray-200 hover:border-emerald-300 hover:shadow-md'
+      }`}
+    >
+      {isCurrentPrediction && (
+        <div className="absolute top-3 right-3">
+          <span className="px-3 py-1 bg-emerald-500 text-white text-xs rounded-full shadow-md">
+            Current
+          </span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div>
+          <div className="text-xs text-gray-600 mb-1 flex items-center gap-1">
+            <TrendingUp className="w-3 h-3" />
+            Estimated Cost
+          </div>
+          <div className="text-lg font-medium text-emerald-600">
+            LKR {(prediction.estimated_cost / 1000).toFixed(0)}K
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs text-gray-600 mb-1 flex items-center gap-1">
+            <Users className="w-3 h-3" />
+            Guest Count
+          </div>
+          <div className="text-lg font-medium text-gray-900">
+            {prediction.guest_count}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs text-gray-600 mb-1 flex items-center gap-1">
+            <MapPin className="w-3 h-3" />
+            Venue Type
+          </div>
+          <div className="text-sm font-medium text-gray-900 capitalize">
+            {prediction.venue_type}
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs text-gray-600 mb-1 flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            Date
+          </div>
+          <div className="text-sm text-gray-700">
+            {formatDate(prediction.timestamp)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-gray-500" />
+          <span className="text-sm text-gray-600 capitalize">{prediction.wedding_season}</span>
+        </div>
+        
+        <div className={`px-3 py-1 rounded-full text-xs ${
+          prediction.is_within_budget
+            ? 'bg-green-100 text-green-700 border border-green-300'
+            : 'bg-red-100 text-red-700 border border-red-300'
+        }`}>
+          {prediction.is_within_budget ? 'Within Budget' : 'Over Budget'}
         </div>
       </div>
     </motion.div>
