@@ -183,6 +183,7 @@ def predict():
             "user_budget": user_budget,
             "budget_difference": round(user_budget - total_needed, 2) if user_budget > 0 else 0
         }
+        print("Venue_and_Catering")
 
         # 8. Save complete data to MongoDB
         mongodb_document = {
