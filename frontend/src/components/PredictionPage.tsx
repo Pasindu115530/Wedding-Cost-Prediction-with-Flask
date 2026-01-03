@@ -36,6 +36,7 @@ interface PredictionData {
   photography?: PhotographyPackage;
   entertainment?: Entertainment;
   guestCount?: number;
+  budget?: number;
 }
 
 export function PredictionPage({ onNavigateHome }: PredictionPageProps) {
@@ -44,47 +45,53 @@ export function PredictionPage({ onNavigateHome }: PredictionPageProps) {
   const [showResult, setShowResult] = useState(false);
   const [predictedCost, setPredictedCost] = useState<number | null>(null);
 
-  const handlePredict = () => {
-    // Prepare JSON payload
-    const payload = {
-      location_type: data.location,
-      wedding_season: data.season,
-      venue_type: data.venue,
-      decoration_type: data.decoration,
-      photography_package: data.photography,
-      entertainment: data.entertainment,
-      guest_count: data.guestCount
-    };
-
-    console.log('Prediction Payload:', payload);
-
-    // Simulate loading
-    setIsLoading(true);
-    
-    // Mock prediction (replace with actual API call)
-    setTimeout(() => {
-      // Generate a mock prediction based on selections
-      const baseCost = 1500000; // Base cost in LKR
-      let multiplier = 1;
-
-      if (data.location === 'urban') multiplier += 0.3;
-      if (data.location === 'semi-urban') multiplier += 0.15;
-      if (data.season === 'peak') multiplier += 0.2;
-      if (data.venue === 'outdoor') multiplier += 0.1;
-      if (data.decoration === 'luxury') multiplier += 0.4;
-      if (data.decoration === 'standard') multiplier += 0.2;
-      if (data.photography === 'premium') multiplier += 0.15;
-      if (data.entertainment === 'live-band') multiplier += 0.2;
-      if (data.entertainment === 'dj') multiplier += 0.1;
-
-      const cost = Math.round(baseCost * multiplier);
-      setPredictedCost(cost);
-      setIsLoading(false);
-      setShowResult(true);
-    }, 2000);
+ const handlePredict = async () => {
+  // 1. Prepare JSON payload
+  const payload = {
+    location_type: data.location,
+    wedding_season: data.season,
+    venue_type: data.venue,
+    decoration_type: data.decoration,
+    photography_package: data.photography,
+    entertainment: data.entertainment,
+    guest_count: data.guestCount
   };
 
-  const isComplete = data.location && data.season && data.venue && data.decoration && data.photography && data.entertainment && data.guestCount;
+  console.log('Sending Payload:', payload);
+  setIsLoading(true);
+
+  try {
+    // 2. Make the API call to your Flask backend
+    // Replace the URL with your production URL when you deploy
+    const response = await fetch('http://127.0.0.1:5000/predict', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}`);
+    }
+
+    // 3. Parse the JSON response
+    const result = await response.json();
+    
+    // 4. Update state with the backend's prediction
+    // Assuming your Flask returns { "predicted_cost": 2500000 }
+    setPredictedCost(result.predicted_cost);
+    setShowResult(true);
+
+  } catch (error) {
+    console.error('Prediction Error:', error);
+    alert("Could not connect to the prediction server. Please ensure the backend is running.");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+  const isComplete = data.location && data.season && data.venue && data.decoration && data.photography && data.entertainment && data.guestCount && data.budget;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-rose-50 via-white to-pink-50">
@@ -488,6 +495,120 @@ export function PredictionPage({ onNavigateHome }: PredictionPageProps) {
                               <div className="text-center">
                                 <div className="text-gray-500">Grand</div>
                                 <div className="text-gray-700">300+</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </Section>
+
+              {/* Budget Input - NEW SECTION */}
+              <Section 
+                title="Your Budget" 
+                icon={TrendingUp}
+                description="What is your wedding budget?"
+              >
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5 }}
+                  className="max-w-3xl mx-auto"
+                >
+                  <div className="relative overflow-hidden rounded-2xl shadow-lg group">
+                    {/* Background Image */}
+                    <div className="relative h-64 overflow-hidden">
+                      <div 
+                        className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
+                        style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb25leSUyMGJ1ZGdldCUyMHdlZGRpbmd8ZW58MXx8fHwxNzM2Nzc4MDAwfDA&ixlib=rb-4.1.0&q=80&w=1080)' }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent" />
+                    </div>
+
+                    {/* Input Card Overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center p-8">
+                      <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-xl p-8 shadow-2xl">
+                        <div className="text-center mb-6">
+                          <div className="inline-flex p-3 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 mb-4">
+                            <TrendingUp className="w-8 h-8 text-white" />
+                          </div>
+                          <h3 className="text-2xl mb-2">Enter Your Budget</h3>
+                          <p className="text-muted-foreground">Total amount you plan to spend</p>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="relative">
+                            <span className="absolute left-6 top-1/2 -translate-y-1/2 text-2xl text-gray-500">₹</span>
+                            <input
+                              type="number"
+                              min="100000"
+                              max="50000000"
+                              step="50000"
+                              value={data.budget || ''}
+                              onChange={(e) => setData({ ...data, budget: parseInt(e.target.value) || undefined })}
+                              placeholder="e.g., 1500000"
+                              className="w-full pl-12 pr-6 py-4 text-center text-2xl rounded-xl border-2 border-gray-200 focus:border-rose-500 focus:ring-4 focus:ring-rose-500/20 outline-none transition-all duration-300"
+                            />
+                          </div>
+
+                          {/* Quick Select Options */}
+                          <div className="grid grid-cols-3 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setData({ ...data, budget: 500000 })}
+                              className={`py-2 px-4 rounded-lg border-2 transition-all duration-300 ${
+                                data.budget === 500000
+                                  ? 'border-rose-500 bg-rose-50 text-rose-700'
+                                  : 'border-gray-200 hover:border-rose-300 text-gray-600'
+                              }`}
+                            >
+                              ₹5L
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setData({ ...data, budget: 1000000 })}
+                              className={`py-2 px-4 rounded-lg border-2 transition-all duration-300 ${
+                                data.budget === 1000000
+                                  ? 'border-rose-500 bg-rose-50 text-rose-700'
+                                  : 'border-gray-200 hover:border-rose-300 text-gray-600'
+                              }`}
+                            >
+                              ₹10L
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setData({ ...data, budget: 2000000 })}
+                              className={`py-2 px-4 rounded-lg border-2 transition-all duration-300 ${
+                                data.budget === 2000000
+                                  ? 'border-rose-500 bg-rose-50 text-rose-700'
+                                  : 'border-gray-200 hover:border-rose-300 text-gray-600'
+                              }`}
+                            >
+                              ₹20L
+                            </button>
+                          </div>
+
+                          {/* Budget Range Info */}
+                          <div className="pt-4 border-t border-gray-200">
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div className="text-center">
+                                <div className="text-gray-500">Budget</div>
+                                <div className="text-gray-700">₹5-10L</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-gray-500">Mid-Range</div>
+                                <div className="text-gray-700">₹10-20L</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-gray-500">Premium</div>
+                                <div className="text-gray-700">₹20-30L</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-gray-500">Luxury</div>
+                                <div className="text-gray-700">₹30L+</div>
                               </div>
                             </div>
                           </div>
