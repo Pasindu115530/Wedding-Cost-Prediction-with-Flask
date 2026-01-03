@@ -1,5 +1,5 @@
-import { motion } from 'motion/react';
-import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Heart, 
   TrendingUp, 
@@ -14,7 +14,6 @@ import {
   Music,
   Boxes,
   Info,
-  ArrowRight,
   CheckCircle2,
   TrendingDown,
   Database,
@@ -22,13 +21,13 @@ import {
   Users,
   Calendar
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 interface ResultPageProps {
   cost: number;
   onReset: () => void;
   onModify: () => void;
-  predictionId?: string; // Add prediction ID from the response
+  predictionId?: string;
 }
 
 interface CostBreakdown {
@@ -48,6 +47,10 @@ interface PredictionHistory {
   wedding_season: string;
   timestamp: string;
   is_within_budget: boolean;
+  division_breakdown?: {
+    [key: string]: number;
+  };
+  predicted_cost_with_buffer?: number;
 }
 
 interface PredictionStats {
@@ -67,24 +70,32 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
   const [stats, setStats] = useState<PredictionStats | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [costBreakdown, setProcessedBreakdown] = useState<CostBreakdown[]>([]);
-  const [pieData, setChartData] = useState<any[]>([]);
+  const [costBreakdown, setCostBreakdown] = useState<CostBreakdown[]>([]);
+  const [pieData, setPieData] = useState<any[]>([]);
   const [barData, setBarData] = useState<any[]>([]);
   const [budgetRange, setBudgetRange] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
-  const [highestCategory, setHighestCategory] = useState<CostBreakdown>
-
+  const [highestCategory, setHighestCategory] = useState<CostBreakdown>({
+    category: 'Venue',
+    icon: MapPin,
+    percentage: 0,
+    amount: 0,
+    color: '#f43f5e'
+  });
 
   // Animated count-up effect
   useEffect(() => {
+    const targetCost = recentPredictions[0]?.estimated_cost || cost;
+    if (targetCost <= 0) return;
+
     const duration = 2000;
     const steps = 60;
-    const increment = cost / steps;
+    const increment = targetCost / steps;
     let current = 0;
 
     const timer = setInterval(() => {
       current += increment;
-      if (current >= cost) {
-        setDisplayCost(cost);
+      if (current >= targetCost) {
+        setDisplayCost(targetCost);
         clearInterval(timer);
       } else {
         setDisplayCost(Math.floor(current));
@@ -92,94 +103,226 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
     }, duration / steps);
 
     return () => clearInterval(timer);
+  }, [cost, recentPredictions]);
+
+  // Initialize breakdown using useCallback to prevent re-creation
+  const initializeBreakdown = useCallback(() => {
+    if (cost <= 0) return;
+
+    const breakdown: CostBreakdown[] = [
+      {
+        category: 'Venue & Catering',
+        icon: MapPin,
+        percentage: 48,
+        amount: Math.round(cost * 0.48),
+        color: '#f43f5e'
+      },
+      {
+        category: 'Photography & Video',
+        icon: Camera,
+        percentage: 12,
+        amount: Math.round(cost * 0.12),
+        color: '#8b5cf6'
+      },
+      {
+        category: 'Flowers & Decor',
+        icon: Flower2,
+        percentage: 10,
+        amount: Math.round(cost * 0.10),
+        color: '#f59e0b'
+      },
+      {
+        category: 'Music & Entertainment',
+        icon: Music,
+        percentage: 8,
+        amount: Math.round(cost * 0.08),
+        color: '#06b6d4'
+      },
+      {
+        category: 'Attire & Beauty',
+        icon: Sparkles,
+        percentage: 9,
+        amount: Math.round(cost * 0.09),
+        color: '#ec4899'
+      },
+      {
+        category: 'Miscellaneous & Buffer',
+        icon: Boxes,
+        percentage: 13,
+        amount: Math.round(cost * 0.13),
+        color: '#10b981'
+      }
+    ];
+
+    setCostBreakdown(breakdown);
+
+    // Set pie chart data
+    const pieChartData = breakdown.map(item => ({
+      name: item.category,
+      value: item.percentage,
+      amount: item.amount,
+      color: item.color
+    }));
+    setPieData(pieChartData);
+
+    // Set bar chart data
+    const barChartData = breakdown.map(item => ({
+      name: item.category,
+      cost: item.amount,
+      color: item.color
+    }));
+    setBarData(barChartData);
+
+    // Set budget range
+    const minBudget = Math.round(cost * 0.85);
+    const maxBudget = Math.round(cost * 1.15);
+    setBudgetRange({ min: minBudget, max: maxBudget });
+
+    // Find highest category
+    const highest = breakdown.reduce((max, item) => 
+      item.percentage > max.percentage ? item : max
+    , breakdown[0]);
+    setHighestCategory(highest);
   }, [cost]);
 
-  const fetchRecentPredictions = async () => {
-  try {
-    setLoading(true);
-    const response = await fetch('http://localhost:5000/predictions/recent?limit=1');
-    const data = await response.json();
+  // Initialize budget breakdown on mount
+  useEffect(() => {
+    initializeBreakdown();
+  }, [initializeBreakdown]);
 
-    if (data.status === 'Success' && data.predictions.length > 0) {
-      const latest = data.predictions[0];
+  // Fetch recent predictions
+  const fetchRecentPredictions = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('http://localhost:5000/predictions/recent?limit=5');
       
-      // Access the total cost and the breakdown dictionary from your JSON
-      const totalCost = latest.predicted_cost_with_buffer || 0;
-      const dbBreakdown = latest.division_breakdown || {};
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
 
-      // Update state with the full record
-      setRecentPredictions([latest]);
-
-      // Map the backend JSON fields to your frontend structure
-      const costBreakdown: CostBreakdown[] = [
-        {
-          category: 'Venue',
-          icon: MapPin,
-          percentage: 25,
-          // Accessing the specific key from your JSON result
-          amount: dbBreakdown['Venue_and_Catering'] * 0.4 || 0, 
-          color: '#f43f5e'
-        },
-        {
-          category: 'Catering',
-          icon: UtensilsCrossed,
-          percentage: 35,
-          amount: dbBreakdown['Venue_and_Catering'] * 0.6 || 0,
-          color: '#ec4899'
-        },
-        {
-          category: 'Decoration',
-          icon: Flower2,
-          percentage: 15,
-          amount: dbBreakdown['Flowers_and_Decor'] || 0,
-          color: '#f59e0b'
-        },
-        {
-          category: 'Photography',
-          icon: Camera,
-          percentage: 12,
-          amount: dbBreakdown['Photography_and_Video'] || 0,
-          color: '#8b5cf6'
-        },
-        {
-          category: 'Entertainment',
-          icon: Music,
-          percentage: 8,
-          amount: dbBreakdown['Music_and_Entertainment'] || 0,
-          color: '#06b6d4'
-        },
-        {
-          category: 'Miscellaneous',
-          icon: Boxes,
-          percentage: 5,
-          amount: dbBreakdown['Miscellaneous_and_Buffer'] || 0,
-          color: '#10b981'
+      if (data.status === 'Success' && data.predictions && data.predictions.length > 0) {
+        setRecentPredictions(data.predictions);
+        const latest = data.predictions[0];
+        if (latest.division_breakdown) {
+          updateBreakdownFromDatabase(latest);
         }
-      ];
-
-      // Final calculations for UI components
-      const minBudget = Math.round(totalCost * 0.85);
-      const maxBudget = Math.round(totalCost * 1.15);
-
-      const pieData = costBreakdown.map(item => ({
-        name: item.category,
-        value: item.percentage,
-        amount: item.amount,
-        color: item.color
-      }));
-
-      // Update your React states here so the UI refreshes
-      setProcessedBreakdown(costBreakdown);
-      setChartData(pieData);
-      setBudgetRange({ min: minBudget, max: maxBudget });
+      }
+    } catch (error) {
+      console.error('Error fetching predictions:', error);
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    console.error('Error fetching latest record:', error);
-  } finally {
-    setLoading(false);
-  }
-};
+  }, []);
 
+  // Update breakdown from database
+  const updateBreakdownFromDatabase = useCallback((latest: PredictionHistory) => {
+    const totalCost = latest.predicted_cost_with_buffer || cost;
+    const dbBreakdown = latest.division_breakdown || {};
+
+    const breakdown: CostBreakdown[] = [
+      {
+        category: 'Venue & Catering',
+        icon: MapPin,
+        percentage: 48,
+        amount: dbBreakdown['Venue_and_Catering'] || Math.round(totalCost * 0.48),
+        color: '#f43f5e'
+      },
+      {
+        category: 'Photography & Video',
+        icon: Camera,
+        percentage: 12,
+        amount: dbBreakdown['Photography_and_Video'] || Math.round(totalCost * 0.12),
+        color: '#8b5cf6'
+      },
+      {
+        category: 'Flowers & Decor',
+        icon: Flower2,
+        percentage: 10,
+        amount: dbBreakdown['Flowers_and_Decor'] || Math.round(totalCost * 0.10),
+        color: '#f59e0b'
+      },
+      {
+        category: 'Music & Entertainment',
+        icon: Music,
+        percentage: 8,
+        amount: dbBreakdown['Music_and_Entertainment'] || Math.round(totalCost * 0.08),
+        color: '#06b6d4'
+      },
+      {
+        category: 'Attire & Beauty',
+        icon: Sparkles,
+        percentage: 9,
+        amount: dbBreakdown['Attire_and_Beauty'] || Math.round(totalCost * 0.09),
+        color: '#ec4899'
+      },
+      {
+        category: 'Miscellaneous & Buffer',
+        icon: Boxes,
+        percentage: 13,
+        amount: dbBreakdown['Miscellaneous_and_Buffer'] || Math.round(totalCost * 0.13),
+        color: '#10b981'
+      }
+    ];
+
+    setCostBreakdown(breakdown);
+
+    // Update chart data
+    const pieChartData = breakdown.map(item => ({
+      name: item.category,
+      value: item.percentage,
+      amount: item.amount,
+      color: item.color
+    }));
+    setPieData(pieChartData);
+
+    const barChartData = breakdown.map(item => ({
+      name: item.category,
+      cost: item.amount,
+      color: item.color
+    }));
+    setBarData(barChartData);
+
+    // Update budget range
+    const minBudget = Math.round(totalCost * 0.85);
+    const maxBudget = Math.round(totalCost * 1.15);
+    setBudgetRange({ min: minBudget, max: maxBudget });
+
+    // Find highest category
+    const highest = breakdown.reduce((max, item) => 
+      item.percentage > max.percentage ? item : max
+    , breakdown[0]);
+    setHighestCategory(highest);
+  }, [cost]);
+
+  // Fetch statistics
+  const fetchStats = useCallback(async () => {
+    try {
+      const response = await fetch('http://localhost:5000/predictions/stats');
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.status === 'Success') {
+        setStats(data);
+      }
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    }
+  }, []);
+
+  // Fetch predictions and stats on mount
+  useEffect(() => {
+    fetchRecentPredictions();
+    fetchStats();
+  }, [fetchRecentPredictions, fetchStats]);
+
+  const minBudget = budgetRange.min;
+  const maxBudget = budgetRange.max;
 
   return (
     <motion.div
@@ -207,7 +350,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
             >
               <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-lg">
                 <Sparkles className="w-4 h-4" />
-                <span className="text-sm">AI Estimated</span>
+                <span className="text-sm font-medium">AI Estimated</span>
               </div>
             </motion.div>
 
@@ -222,7 +365,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
                 <Heart className="w-10 h-10 text-white" />
               </motion.div>
 
-              <h1 className="text-3xl sm:text-4xl mb-8">Estimated Wedding Budget</h1>
+              <h1 className="text-3xl sm:text-4xl font-bold mb-8 text-gray-900">Estimated Wedding Budget</h1>
 
               {/* Main Amount */}
               <motion.div
@@ -231,10 +374,10 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
                 transition={{ delay: 0.5, type: 'spring', stiffness: 100 }}
                 className="mb-6"
               >
-                <div className="text-5xl sm:text-7xl text-transparent bg-clip-text bg-gradient-to-r from-amber-500 via-rose-500 to-pink-500 mb-2">
-                  LKR {displayCost.toLocaleString()}
+                <div className="text-5xl sm:text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-500 via-rose-500 to-pink-500 mb-2">
+                  LKR {displayCost.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                 </div>
-                <p className="text-muted-foreground text-lg">Sri Lankan Rupees</p>
+                <p className="text-gray-600 text-lg">Sri Lankan Rupees</p>
               </motion.div>
 
               {/* Budget Range */}
@@ -282,7 +425,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
               <div className="p-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 shadow-lg">
                 <Database className="w-6 h-6 text-white" />
               </div>
-              <h3 className="text-2xl">Wedding Prediction Statistics</h3>
+              <h3 className="text-2xl font-bold text-gray-900">Wedding Prediction Statistics</h3>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -295,13 +438,13 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
               <StatsCard
                 icon={Users}
                 label="Avg Guest Count"
-                value={Math.round(stats.statistics.avg_guest_count || 0).toString()}
+                value={Math.round(stats.statistics?.avg_guest_count || 0).toString()}
                 color="from-purple-500 to-pink-500"
               />
               <StatsCard
                 icon={TrendingUp}
                 label="Avg Budget"
-                value={`LKR ${((stats.statistics.avg_estimated_cost || 0) / 1000).toFixed(0)}K`}
+                value={`LKR ${((stats.statistics?.avg_estimated_cost || 0) / 1000).toFixed(0)}K`}
                 color="from-rose-500 to-orange-500"
               />
             </div>
@@ -309,12 +452,12 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
             {/* Popular Venues */}
             {stats.popular_venues && stats.popular_venues.length > 0 && (
               <div className="mt-6 p-4 bg-white/70 rounded-xl">
-                <h4 className="text-lg mb-3 flex items-center gap-2">
+                <h4 className="text-lg font-semibold mb-3 flex items-center gap-2">
                   <MapPin className="w-5 h-5 text-blue-600" />
                   Most Popular Venue Types
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {stats.popular_venues.slice(0, 5).map((venue, index) => (
+                  {stats.popular_venues.slice(0, 5).map((venue) => (
                     <span
                       key={venue._id}
                       className="px-4 py-2 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-full text-sm border border-blue-300"
@@ -335,8 +478,8 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
           transition={{ duration: 0.6, delay: 0.4 }}
         >
           <div className="text-center mb-6">
-            <h2 className="text-2xl sm:text-3xl mb-2">Cost Distribution</h2>
-            <p className="text-muted-foreground">Breakdown of your wedding budget by category</p>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-2 text-gray-900">Cost Distribution</h2>
+            <p className="text-gray-600">Breakdown of your wedding budget by category</p>
           </div>
 
           {/* Chart Toggle */}
@@ -344,7 +487,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
             <div className="inline-flex items-center gap-2 p-1 rounded-full bg-white shadow-md border border-gray-200">
               <button
                 onClick={() => setShowChartType('pie')}
-                className={`px-6 py-2 rounded-full transition-all duration-300 ${
+                className={`px-6 py-2 rounded-full transition-all duration-300 font-medium ${
                   showChartType === 'pie'
                     ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg'
                     : 'text-gray-600 hover:bg-gray-100'
@@ -354,7 +497,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
               </button>
               <button
                 onClick={() => setShowChartType('bar')}
-                className={`px-6 py-2 rounded-full transition-all duration-300 ${
+                className={`px-6 py-2 rounded-full transition-all duration-300 font-medium ${
                   showChartType === 'bar'
                     ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-lg'
                     : 'text-gray-600 hover:bg-gray-100'
@@ -375,13 +518,13 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
           </div>
         </motion.div>
 
-        {/* Percentage Breakdown Cards */}
+        {/* Detailed Breakdown Cards */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.6 }}
         >
-          <h2 className="text-2xl sm:text-3xl mb-6 text-center">Detailed Breakdown</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold mb-6 text-center text-gray-900">Detailed Breakdown</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {costBreakdown.map((item, index) => (
               <CategoryCard key={item.category} item={item} delay={index * 0.1} />
@@ -401,11 +544,11 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
               <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 shadow-lg">
                 <Clock className="w-6 h-6 text-white" />
               </div>
-              <h3 className="text-2xl">Recent Predictions</h3>
+              <h3 className="text-2xl font-bold text-gray-900">Recent Predictions</h3>
             </div>
             <button
               onClick={() => setShowHistory(!showHistory)}
-              className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all duration-300 shadow-md"
+              className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 transition-all duration-300 shadow-md font-medium"
             >
               {showHistory ? 'Hide' : 'Show'} History
             </button>
@@ -431,7 +574,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
                   <div className="mt-6 text-center">
                     <button
                       onClick={fetchRecentPredictions}
-                      className="px-6 py-3 rounded-lg border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-all duration-300 flex items-center gap-2 mx-auto"
+                      className="px-6 py-3 rounded-lg border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50 transition-all duration-300 flex items-center gap-2 mx-auto font-medium"
                     >
                       <RefreshCw className="w-5 h-5" />
                       Refresh History
@@ -460,7 +603,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1">
-              <h3 className="text-xl mb-3">AI Insights & Recommendations</h3>
+              <h3 className="text-xl font-bold mb-3 text-gray-900">AI Insights & Recommendations</h3>
               <div className="space-y-3">
                 <div className="flex items-start gap-2">
                   <CheckCircle2 className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
@@ -497,7 +640,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
             onClick={onModify}
-            className="group w-full sm:w-auto px-8 py-4 rounded-full border-2 border-rose-500 text-rose-500 hover:bg-rose-50 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+            className="group w-full sm:w-auto px-8 py-4 rounded-full border-2 border-rose-500 text-rose-500 hover:bg-rose-50 transition-all duration-300 shadow-lg hover:shadow-xl flex items-center justify-center gap-2 font-medium"
           >
             <Edit className="w-5 h-5 group-hover:rotate-12 transition-transform" />
             <span>Modify Selection</span>
@@ -506,7 +649,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
           <motion.button
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
-            className="group w-full sm:w-auto px-8 py-4 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 transition-all duration-300 shadow-lg shadow-rose-500/30 hover:shadow-xl hover:shadow-rose-500/50 flex items-center justify-center gap-2"
+            className="group w-full sm:w-auto px-8 py-4 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 text-white hover:from-rose-600 hover:to-pink-600 transition-all duration-300 shadow-lg shadow-rose-500/30 hover:shadow-xl hover:shadow-rose-500/50 flex items-center justify-center gap-2 font-medium"
           >
             <Download className="w-5 h-5 group-hover:translate-y-1 transition-transform" />
             <span>Download Report</span>
@@ -516,7 +659,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
             whileHover={{ scale: 1.05, y: -2 }}
             whileTap={{ scale: 0.95 }}
             onClick={onReset}
-            className="group w-full sm:w-auto px-8 py-4 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 transition-all duration-300 shadow-lg shadow-purple-500/30 hover:shadow-xl hover:shadow-purple-500/50 flex items-center justify-center gap-2"
+            className="group w-full sm:w-auto px-8 py-4 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600 transition-all duration-300 shadow-lg shadow-purple-500/30 hover:shadow-xl hover:shadow-purple-500/50 flex items-center justify-center gap-2 font-medium"
           >
             <RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
             <span>Start New Prediction</span>
@@ -551,17 +694,15 @@ function DonutChart({ data, totalBudget }: { data: any[]; totalBudget: number })
         </PieChart>
       </ResponsiveContainer>
 
-      {/* Center Text */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="text-center">
           <div className="text-gray-500 text-sm mb-1">Total Budget</div>
-          <div className="text-2xl text-transparent bg-clip-text bg-gradient-to-r from-rose-500 to-pink-500">
+          <div className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-rose-500 to-pink-500">
             LKR {(totalBudget / 1000).toFixed(0)}K
           </div>
         </div>
       </div>
 
-      {/* Legend */}
       <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-4">
         {data.map((item, index) => (
           <div key={index} className="flex items-center gap-2">
@@ -570,7 +711,7 @@ function DonutChart({ data, totalBudget }: { data: any[]; totalBudget: number })
               style={{ backgroundColor: item.color }}
             />
             <div className="text-sm">
-              <div className="text-gray-700">{item.name}</div>
+              <div className="text-gray-700 font-medium">{item.name}</div>
               <div className="text-gray-500">{item.value}%</div>
             </div>
           </div>
@@ -655,14 +796,12 @@ function CategoryCard({ item, delay }: { item: CostBreakdown; delay: number }) {
       whileHover={{ y: -5, scale: 1.02 }}
       className="group relative overflow-hidden bg-white rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all duration-300 border border-gray-100"
     >
-      {/* Background Gradient on Hover */}
       <div 
         className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity duration-300"
         style={{ background: `linear-gradient(135deg, ${item.color} 0%, transparent 100%)` }}
       />
 
       <div className="relative">
-        {/* Icon */}
         <div 
           className="inline-flex p-3 rounded-xl mb-4 group-hover:scale-110 transition-transform duration-300"
           style={{ backgroundColor: `${item.color}20` }}
@@ -670,26 +809,23 @@ function CategoryCard({ item, delay }: { item: CostBreakdown; delay: number }) {
           <Icon className="w-6 h-6" style={{ color: item.color }} />
         </div>
 
-        {/* Category Name */}
-        <h3 className="text-xl mb-2">{item.category}</h3>
+        <h3 className="text-xl font-bold mb-2 text-gray-900">{item.category}</h3>
 
-        {/* Percentage & Amount */}
         <div className="space-y-2 mb-4">
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-600">Percentage</span>
-            <span className="text-lg" style={{ color: item.color }}>
+            <span className="text-lg font-semibold" style={{ color: item.color }}>
               {item.percentage}%
             </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-600">Amount</span>
-            <span className="text-lg" style={{ color: item.color }}>
+            <span className="text-lg font-semibold" style={{ color: item.color }}>
               LKR {(item.amount / 1000).toFixed(0)}K
             </span>
           </div>
         </div>
 
-        {/* Progress Bar */}
         <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
           <motion.div
             initial={{ width: 0 }}
@@ -701,7 +837,6 @@ function CategoryCard({ item, delay }: { item: CostBreakdown; delay: number }) {
           />
         </div>
 
-        {/* Ring Progress Indicator */}
         <div className="absolute top-4 right-4">
           <svg className="w-12 h-12 transform -rotate-90">
             <circle
@@ -727,7 +862,7 @@ function CategoryCard({ item, delay }: { item: CostBreakdown; delay: number }) {
             />
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-xs" style={{ color: item.color }}>
+            <span className="text-xs font-semibold" style={{ color: item.color }}>
               {item.percentage}%
             </span>
           </div>
@@ -737,7 +872,6 @@ function CategoryCard({ item, delay }: { item: CostBreakdown; delay: number }) {
   );
 }
 
-// Stats Card Component
 function StatsCard({ icon: Icon, label, value, color }: { 
   icon: React.ElementType; 
   label: string; 
@@ -753,12 +887,11 @@ function StatsCard({ icon: Icon, label, value, color }: {
         <Icon className="w-6 h-6 text-white" />
       </div>
       <div className="text-sm text-gray-600 mb-1">{label}</div>
-      <div className="text-2xl text-gray-900">{value}</div>
+      <div className="text-2xl font-bold text-gray-900">{value}</div>
     </motion.div>
   );
 }
 
-// Prediction Card Component
 function PredictionCard({ 
   prediction, 
   delay, 
@@ -791,7 +924,7 @@ function PredictionCard({
     >
       {isCurrentPrediction && (
         <div className="absolute top-3 right-3">
-          <span className="px-3 py-1 bg-emerald-500 text-white text-xs rounded-full shadow-md">
+          <span className="px-3 py-1 bg-emerald-500 text-white text-xs font-medium rounded-full shadow-md">
             Current
           </span>
         </div>
@@ -845,7 +978,7 @@ function PredictionCard({
           <span className="text-sm text-gray-600 capitalize">{prediction.wedding_season}</span>
         </div>
         
-        <div className={`px-3 py-1 rounded-full text-xs ${
+        <div className={`px-3 py-1 rounded-full text-xs font-medium ${
           prediction.is_within_budget
             ? 'bg-green-100 text-green-700 border border-green-300'
             : 'bg-red-100 text-red-700 border border-red-300'
@@ -856,15 +989,3 @@ function PredictionCard({
     </motion.div>
   );
 }
-function setProcessedBreakdown(costBreakdown: CostBreakdown[]) {
-  throw new Error('Function not implemented.');
-}
-
-function setChartData(pieData: { name: string; value: number; amount: number; color: string; }[]) {
-  throw new Error('Function not implemented.');
-}
-
-function setBudgetRange(arg0: { min: number; max: number; }) {
-  throw new Error('Function not implemented.');
-}
-
