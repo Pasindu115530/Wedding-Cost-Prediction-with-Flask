@@ -63,7 +63,7 @@ export function PredictionPage({ onNavigateHome }: PredictionPageProps) {
   try {
     // 2. Make the API call to your Flask backend
     // Replace the URL with your production URL when you deploy
-    const response = await fetch('http://127.0.0.1:5000/predict', {
+    const response = await fetch(`${(import.meta as any).env.VITE_BACKEND_URL}/predict` , {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

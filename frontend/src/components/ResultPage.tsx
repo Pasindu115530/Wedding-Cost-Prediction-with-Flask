@@ -194,7 +194,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
   const fetchRecentPredictions = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:5000/predictions/recent?limit=5');
+      const response = await fetch(`${(import.meta as any).env.VITE_BACKEND_URL}/predictions/recent?limit=5`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -299,7 +299,7 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
   // Fetch statistics
   const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:5000/predictions/stats');
+      const response = await fetch(`${(import.meta as any).env.VITE_BACKEND_URL}/predictions/stats`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
