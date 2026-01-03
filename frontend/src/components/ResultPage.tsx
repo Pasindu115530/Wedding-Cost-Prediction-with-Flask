@@ -67,6 +67,12 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
   const [stats, setStats] = useState<PredictionStats | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [costBreakdown, setProcessedBreakdown] = useState<CostBreakdown[]>([]);
+  const [pieData, setChartData] = useState<any[]>([]);
+  const [barData, setBarData] = useState<any[]>([]);
+  const [budgetRange, setBudgetRange] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
+  const [highestCategory, setHighestCategory] = useState<CostBreakdown>
+
 
   // Animated count-up effect
   useEffect(() => {
@@ -88,94 +94,92 @@ export function ResultPage({ cost, onReset, onModify, predictionId }: ResultPage
     return () => clearInterval(timer);
   }, [cost]);
 
-  // Calculate cost breakdown
-  const costBreakdown: CostBreakdown[] = [
-    {
-      category: 'Venue',
-      icon: MapPin,
-      percentage: 25,
-      amount: cost * 0.25,
-      color: '#f43f5e'
-    },
-    {
-      category: 'Catering',
-      icon: UtensilsCrossed,
-      percentage: 35,
-      amount: cost * 0.35,
-      color: '#ec4899'
-    },
-    {
-      category: 'Decoration',
-      icon: Flower2,
-      percentage: 15,
-      amount: cost * 0.15,
-      color: '#f59e0b'
-    },
-    {
-      category: 'Photography',
-      icon: Camera,
-      percentage: 12,
-      amount: cost * 0.12,
-      color: '#8b5cf6'
-    },
-    {
-      category: 'Entertainment',
-      icon: Music,
-      percentage: 8,
-      amount: cost * 0.08,
-      color: '#06b6d4'
-    },
-    {
-      category: 'Miscellaneous',
-      icon: Boxes,
-      percentage: 5,
-      amount: cost * 0.05,
-      color: '#10b981'
-    }
-  ];
-
-  const minBudget = Math.round(cost * 0.85);
-  const maxBudget = Math.round(cost * 1.15);
-
-  const pieData = costBreakdown.map(item => ({
-    name: item.category,
-    value: item.percentage,
-    amount: item.amount,
-    color: item.color
-  }));
-
-  const barData = costBreakdown.map(item => ({
-    name: item.category,
-    cost: item.amount,
-    color: item.color
-  }));
-
-  const highestCategory = costBreakdown.reduce((prev, current) => 
-    prev.percentage > current.percentage ? prev : current
-  );
-
-  // Fetch recent predictions from database
-  useEffect(() => {
-    fetchRecentPredictions();
-  }, [predictionId]);
-
   const fetchRecentPredictions = async () => {
-    try {
-      setLoading(true);
-      // Change limit to 1 to get only the most recent record
-      const response = await fetch('http://localhost:5000/predictions/recent?limit=1');
-      const data = await response.json();
+  try {
+    setLoading(true);
+    const response = await fetch('http://localhost:5000/predictions/recent?limit=1');
+    const data = await response.json();
+
+    if (data.status === 'Success' && data.predictions.length > 0) {
+      const latest = data.predictions[0];
       
-      if (data.status === 'Success' && data.predictions.length > 0) {
-        // Store only the first (latest) record
-        setRecentPredictions([data.predictions[0]]); 
-      }
-    } catch (error) {
-      console.error('Error fetching latest record:', error);
-    } finally {
-      setLoading(false);
+      // Access the total cost and the breakdown dictionary from your JSON
+      const totalCost = latest.predicted_cost_with_buffer || 0;
+      const dbBreakdown = latest.division_breakdown || {};
+
+      // Update state with the full record
+      setRecentPredictions([latest]);
+
+      // Map the backend JSON fields to your frontend structure
+      const costBreakdown: CostBreakdown[] = [
+        {
+          category: 'Venue',
+          icon: MapPin,
+          percentage: 25,
+          // Accessing the specific key from your JSON result
+          amount: dbBreakdown['Venue_and_Catering'] * 0.4 || 0, 
+          color: '#f43f5e'
+        },
+        {
+          category: 'Catering',
+          icon: UtensilsCrossed,
+          percentage: 35,
+          amount: dbBreakdown['Venue_and_Catering'] * 0.6 || 0,
+          color: '#ec4899'
+        },
+        {
+          category: 'Decoration',
+          icon: Flower2,
+          percentage: 15,
+          amount: dbBreakdown['Flowers_and_Decor'] || 0,
+          color: '#f59e0b'
+        },
+        {
+          category: 'Photography',
+          icon: Camera,
+          percentage: 12,
+          amount: dbBreakdown['Photography_and_Video'] || 0,
+          color: '#8b5cf6'
+        },
+        {
+          category: 'Entertainment',
+          icon: Music,
+          percentage: 8,
+          amount: dbBreakdown['Music_and_Entertainment'] || 0,
+          color: '#06b6d4'
+        },
+        {
+          category: 'Miscellaneous',
+          icon: Boxes,
+          percentage: 5,
+          amount: dbBreakdown['Miscellaneous_and_Buffer'] || 0,
+          color: '#10b981'
+        }
+      ];
+
+      // Final calculations for UI components
+      const minBudget = Math.round(totalCost * 0.85);
+      const maxBudget = Math.round(totalCost * 1.15);
+
+      const pieData = costBreakdown.map(item => ({
+        name: item.category,
+        value: item.percentage,
+        amount: item.amount,
+        color: item.color
+      }));
+
+      // Update your React states here so the UI refreshes
+      setProcessedBreakdown(costBreakdown);
+      setChartData(pieData);
+      setBudgetRange({ min: minBudget, max: maxBudget });
     }
-  };
+  } catch (error) {
+    console.error('Error fetching latest record:', error);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <motion.div
@@ -852,3 +856,15 @@ function PredictionCard({
     </motion.div>
   );
 }
+function setProcessedBreakdown(costBreakdown: CostBreakdown[]) {
+  throw new Error('Function not implemented.');
+}
+
+function setChartData(pieData: { name: string; value: number; amount: number; color: string; }[]) {
+  throw new Error('Function not implemented.');
+}
+
+function setBudgetRange(arg0: { min: number; max: number; }) {
+  throw new Error('Function not implemented.');
+}
+

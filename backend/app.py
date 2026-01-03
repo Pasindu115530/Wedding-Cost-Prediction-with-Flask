@@ -183,7 +183,7 @@ def predict():
             "user_budget": user_budget,
             "budget_difference": round(user_budget - total_needed, 2) if user_budget > 0 else 0
         }
-        print("Venue_and_Catering")
+        print()
 
         # 8. Save complete data to MongoDB
         mongodb_document = {
@@ -213,7 +213,49 @@ def predict():
         print("❌ Error Details:", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-# --- Additional Routes for Data Retrieval ---
+from flask import request, jsonify
+
+@app.route("/predictions/recent", methods=["GET"])
+def get_recent_predictions():
+    try:
+        if mongo_client is None:
+            return jsonify({"status": "Error", "message": "Database not connected"}), 500
+        
+        limit = int(request.args.get('limit', 10))
+        cursor = predictions_collection.find().sort('timestamp', -1).limit(limit)
+        
+        formatted_predictions = []
+        
+        for doc in cursor:
+            # Map only the specific fields you requested
+            clean_record = {
+                "wedding_season": doc.get("wedding_season"),
+                "venue_type": doc.get("venue_type"),
+                "decoration_type": doc.get("decoration_type"),
+                "photography_package": doc.get("photography_package"),
+                "entertainment": doc.get("entertainment"),
+                "guest_count": doc.get("guest_count"),
+                "is_within_budget": doc.get("is_within_budget"),
+                "estimated_cost": doc.get("estimated_cost"),
+                "predicted_cost_with_buffer": doc.get("predicted_cost_with_buffer"),
+                "division_breakdown": doc.get("division_breakdown"),
+                "budget_difference": doc.get("budget_difference")
+            }
+            
+            # Print the cleaned record to terminal
+            print(f"SENDING TO FRONTEND: {clean_record}")
+            
+            formatted_predictions.append(clean_record)
+            
+        return jsonify({
+            "status": "Success",
+            "count": len(formatted_predictions),
+            "predictions": formatted_predictions
+        })
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"status": "Error", "message": str(e)}), 500
 
 @app.route("/predictions", methods=["GET"])
 def get_all_predictions():
