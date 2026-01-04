@@ -7,6 +7,7 @@ import traceback
 from datetime import datetime
 from pymongo import MongoClient
 from dotenv import load_dotenv
+import certifi
 
 # Load environment variables
 load_dotenv()
@@ -18,8 +19,9 @@ CORS(app)
 try:
     MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
     DATABASE_NAME = os.getenv('DATABASE_NAME', 'wedding_predictions')
-    
-    mongo_client = MongoClient(MONGODB_URI)
+
+    # Use certifi CA bundle to avoid TLS handshake issues on Windows
+    mongo_client = MongoClient(MONGODB_URI, tlsCAFile=certifi.where())
     db = mongo_client[DATABASE_NAME]
     predictions_collection = db['predictions']
     
